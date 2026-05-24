@@ -39,9 +39,6 @@ shipfast/
 | Docker | ✓ | ✓ | ✓ | 6 |
 | Kubernetes | ✓ | ✓ | ✓ | 7 |
 
-## License
-
-MIT License
 
 ## Star History
 
@@ -52,3 +49,7 @@ MIT License
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=EVEDensity/shipfast-skills&type=date&legend=top-left" />
  </picture>
 </a>
+
+## License
+
+MIT License
