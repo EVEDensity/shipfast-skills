@@ -1,2 +1,44 @@
-[README.md](https://github.com/user-attachments/files/28194609/README.md)
-[README_CN.md](https://github.com/user-attachments/files/28194610/README_CN.md)[README_EN.md](https://github.com/user-attachments/files/28194612/README_EN.md)
+# ShipFast
+
+<p align="center">
+  <strong>Ship code from commit to production, fast.</strong>
+</p>
+
+<p align="center">
+  <a href="README_CN.md">中文</a>
+  ·
+  <a href="README_EN.md">English</a>
+</p>
+
+---
+
+## Choose your language
+
+- [中文文档](README_CN.md) — 完整中文文档
+- [English Docs](README_EN.md) — Full English documentation
+
+## Quick Preview
+
+```
+shipfast/
+├── SKILL.md              # Skill entry point
+├── references/           # 8 deep-dive guides
+├── templates/            # 29 reusable templates
+│   ├── github-actions/   #   8 workflows
+│   ├── docker/           #   6 files
+│   ├── kubernetes/       #   7 manifests
+│   ├── jenkins/          #   3 Jenkinsfiles
+│   └── scripts/          #   5 shell scripts
+└── examples/             # 2 full example projects
+```
+
+| Tool | Setup | Troubleshoot | Optimize | Templates |
+|------|:-----:|:------------:|:--------:|:---------:|
+| GitHub Actions | ✓ | ✓ | ✓ | 8 |
+| Jenkins | ✓ | ✓ | ✓ | 3 |
+| Docker | ✓ | ✓ | ✓ | 6 |
+| Kubernetes | ✓ | ✓ | ✓ | 7 |
+
+## License
+
+MIT License
