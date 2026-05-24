@@ -1,0 +1,25 @@
+# Dockerfile for Java/Gradle Applications
+# Prerequisites: Gradle wrapper (gradlew), build.gradle, settings.gradle
+# Customize: {{JAVA_VERSION}}, {{PORT}}, {{JAR_PATTERN}}
+# Last verified: Docker 27.x, Java 21 LTS, Gradle 8.x
+
+# Stage 1: Build
+FROM eclipse-temurin:{{JAVA_VERSION}}-jdk-alpine AS builder
+WORKDIR /app
+COPY gradlew build.gradle settings.gradle ./
+COPY gradle gradle
+RUN ./gradlew --no-daemon dependencies
+COPY src src
+RUN ./gradlew --no-daemon bootJar
+
+# Stage 2: Runtime
+FROM eclipse-temurin:{{JAVA_VERSION}}-jre-alpine
+RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
+COPY --from=builder /app/build/libs/{{JAR_PATTERN}} app.jar
+USER app
+EXPOSE {{PORT}}
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:{{PORT}}/actuator/health | grep -q UP
+ENV JAVA_OPTS="-XX:+UseZGC -XX:MaxRAMPercentage=75.0"
+CMD ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

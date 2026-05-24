@@ -1,0 +1,58 @@
+# Docker Compose for CI Integration Tests
+# Usage:
+#   docker compose -f docker-compose.ci.yml up -d
+#   docker compose -f docker-compose.ci.yml exec -T app npm run test:integration
+#   docker compose -f docker-compose.ci.yml down -v
+#
+# Customize: {{APP_PORT}}, {{DB_TYPE}} (postgres | mysql | mongodb), {{DB_PORT}}
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "{{APP_PORT}}:{{APP_PORT}}"
+    environment:
+      # Database
+      DATABASE_URL: {{DB_CONNECTION_STRING}}
+      DB_HOST: db
+      DB_PORT: "{{DB_PORT}}"
+      DB_USER: testuser
+      DB_PASSWORD: testpass
+      DB_NAME: testdb
+      # App
+      NODE_ENV: test
+      LOG_LEVEL: error
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:{{APP_PORT}}/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    restart: "no"
+
+  db:
+    image: {{DB_IMAGE}}
+    environment:
+      POSTGRES_USER: testuser       # Remove for MySQL/MongoDB
+      POSTGRES_PASSWORD: testpass
+      POSTGRES_DB: testdb
+      MYSQL_ROOT_PASSWORD: rootpass # Remove for Postgres
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: testpass
+      MYSQL_DATABASE: testdb
+    ports:
+      - "{{DB_PORT}}:{{DB_PORT}}"
+    tmpfs: /var/lib/{{DB_DATA_DIR}}  # Ephemeral storage — no persistence
+    healthcheck:
+      test: ["CMD-SHELL", "{{DB_HEALTHCHECK_COMMAND}}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: "no"

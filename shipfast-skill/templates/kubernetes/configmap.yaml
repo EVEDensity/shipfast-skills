@@ -1,0 +1,47 @@
+# Kubernetes ConfigMap
+# Non-sensitive configuration only — use Secrets for passwords, tokens, keys
+# Customize: {{APP_NAME}} and replace the example config with your own
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{APP_NAME}}-config
+  labels:
+    app: {{APP_NAME}}
+data:
+  # Key-value style (simple values)
+  log-level: "info"
+  api-timeout: "30s"
+  max-connections: "100"
+
+  # File style (whole config files)
+  app-config.yaml: |
+    server:
+      port: {{PORT}}
+      read-timeout: 30s
+      write-timeout: 30s
+
+    database:
+      max-open-conns: 25
+      max-idle-conns: 10
+      conn-max-lifetime: 5m
+
+    cache:
+      ttl: 300
+      max-size: 10000
+
+---
+# Usage in Deployment:
+# envFrom:
+#   - configMapRef:
+#       name: {{APP_NAME}}-config
+#
+# Or mount as file:
+# volumes:
+#   - name: config
+#     configMap:
+#       name: {{APP_NAME}}-config
+# volumeMounts:
+#   - name: config
+#     mountPath: /app/config
+#     readOnly: true

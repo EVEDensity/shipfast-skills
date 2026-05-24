@@ -1,0 +1,51 @@
+# Automated Release Pipeline (Release Please)
+# Prerequisites: Conventional Commits (feat:, fix:, chore:, etc.)
+# Customize: {{RELEASE_TYPE}}: node | python | go | simple
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          release-type: {{RELEASE_TYPE}}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish:
+    needs: [release-please]
+    if: ${{ needs.release-please.outputs.release_created }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and publish
+        run: |
+          echo "Publishing version ${{ needs.release-please.outputs.version }}"
+          # Add your publish steps here:
+          # - npm publish / docker build + push / go release / PyPI publish
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release-please.outputs.tag_name }}
+          body: ${{ steps.release.outputs.body }}
+          generate_release_notes: true

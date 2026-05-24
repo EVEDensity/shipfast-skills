@@ -1,0 +1,111 @@
+// Jenkins Declarative Pipeline — Docker Focus
+// Prerequisites: Docker installed on Jenkins agent
+// Customize: {{APP_NAME}}, {{REGISTRY}}, {{SLACK_CHANNEL}}
+// Last verified: Jenkins 2.440+, Docker 27.x
+
+pipeline {
+    agent { label 'docker' }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20', daysToKeepStr: '7'))
+        timeout(time: 45, unit: 'MINUTES')
+        ansiColor('xterm')
+    }
+
+    environment {
+        APP_NAME = '{{APP_NAME}}'
+        REGISTRY = '{{REGISTRY}}'
+        IMAGE = "${REGISTRY}/${APP_NAME}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                script {
+                    env.GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    sh """
+                        docker build \
+                            --build-arg VERSION=${GIT_SHA} \
+                            -t ${IMAGE}:${GIT_SHA} \
+                            -t ${IMAGE}:${env.BUILD_NUMBER} \
+                            -f Dockerfile .
+                    """
+                }
+            }
+        }
+
+        stage('Image Scan') {
+            steps {
+                sh """
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy image \
+                        --severity HIGH,CRITICAL \
+                        --exit-code 0 \
+                        ${IMAGE}:${GIT_SHA}
+                """
+            }
+        }
+
+        stage('Integration Tests') {
+            steps {
+                sh """
+                    docker compose -f docker-compose.ci.yml up -d
+                    docker compose -f docker-compose.ci.yml exec -T app npm run test:integration
+                """
+            }
+            post {
+                always {
+                    sh 'docker compose -f docker-compose.ci.yml down -v'
+                }
+            }
+        }
+
+        stage('Push to Registry') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    docker.withRegistry("https://${REGISTRY}", 'docker-registry-creds') {
+                        sh """
+                            docker push ${IMAGE}:${GIT_SHA}
+                            docker push ${IMAGE}:${env.BUILD_NUMBER}
+                        """
+                        if (env.BRANCH_NAME == 'main') {
+                            sh "docker tag ${IMAGE}:${GIT_SHA} ${IMAGE}:latest"
+                            sh "docker push ${IMAGE}:latest"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker system prune -f --volumes || true'
+            cleanWs()
+        }
+        success {
+            slackSend(
+                channel: '{{SLACK_CHANNEL}}',
+                color: 'good',
+                message: "✓ ${APP_NAME}:${GIT_SHA} built and pushed\n${env.BUILD_URL}"
+            )
+        }
+        failure {
+            slackSend(
+                channel: '{{SLACK_CHANNEL}}',
+                color: 'danger',
+                message: "❌ ${APP_NAME} build FAILED\n${env.BUILD_URL}"
+            )
+        }
+    }
+}

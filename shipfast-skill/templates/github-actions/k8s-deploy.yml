@@ -1,0 +1,84 @@
+# Kubernetes Deploy Pipeline
+# Prerequisites: KUBE_CONFIG secret configured, k8s/ directory with Kustomize structure
+# Customize: {{ENVIRONMENT}}, {{NAMESPACE}}, {{K8S_OVERLAY_PATH}}
+
+name: K8s Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      image-tag:
+        description: 'Image tag to deploy'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      image-tag:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Set image tag
+        run: |
+          cd {{K8S_OVERLAY_PATH}}/${{ inputs.environment }}
+          kustomize edit set image {{IMAGE_NAME}}={{REGISTRY}}/{{IMAGE_NAME}}:${{ inputs.image-tag }}
+
+      - name: Deploy
+        run: |
+          kustomize build {{K8S_OVERLAY_PATH}}/${{ inputs.environment }} | \
+          kubectl apply -f -
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/{{DEPLOYMENT_NAME}} \
+            -n {{NAMESPACE}} \
+            --timeout=5m
+
+      - name: Verify health
+        run: |
+          for i in $(seq 1 10); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" {{HEALTH_CHECK_URL}})
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Attempt $i: status $STATUS, retrying..."
+            sleep 10
+          done
+          echo "Health check failed after 10 attempts"
+          exit 1
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Deploy failed — rolling back"
+          kubectl rollout undo deployment/{{DEPLOYMENT_NAME}} -n {{NAMESPACE}}
+          kubectl rollout status deployment/{{DEPLOYMENT_NAME}} -n {{NAMESPACE}} --timeout=3m

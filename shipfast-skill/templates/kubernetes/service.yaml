@@ -1,0 +1,19 @@
+# Kubernetes Service
+# Customize: {{APP_NAME}}, {{PORT}}, {{SERVICE_TYPE}}: ClusterIP | NodePort | LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{APP_NAME}}
+  labels:
+    app: {{APP_NAME}}
+spec:
+  type: {{SERVICE_TYPE}}
+  selector:
+    app: {{APP_NAME}}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{PORT}}
+      targetPort: {{PORT}}
+  sessionAffinity: None

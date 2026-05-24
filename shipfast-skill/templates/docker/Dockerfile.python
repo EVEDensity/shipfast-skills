@@ -1,0 +1,24 @@
+# Dockerfile for Python Applications
+# Prerequisites: requirements.txt or pyproject.toml at build context root
+# Customize: {{PYTHON_VERSION}}, {{PORT}}, {{APP_MODULE}}
+# Last verified: Docker 27.x, Python 3.12
+
+# Stage 1: Build dependencies
+FROM python:{{PYTHON_VERSION}}-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
+
+# Stage 2: Runtime
+FROM python:{{PYTHON_VERSION}}-slim AS runtime
+RUN groupadd -r app && useradd -r -g app app
+WORKDIR /app
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache /wheels/*.whl && rm -rf /wheels
+COPY . .
+USER app
+EXPOSE {{PORT}}
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:{{PORT}}/health')"
+ENV PYTHONUNBUFFERED=1
+CMD ["python", "-m", "{{APP_MODULE}}"]

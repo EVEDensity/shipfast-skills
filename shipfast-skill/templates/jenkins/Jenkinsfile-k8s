@@ -1,0 +1,155 @@
+// Jenkins Declarative Pipeline — Kubernetes Deploy
+// Prerequisites: Kubernetes plugin, kubectl configured on agent
+// Customize: {{APP_NAME}}, {{NAMESPACE}}, {{SLACK_CHANNEL}}
+// Last verified: Jenkins 2.440+, kubectl 1.30+
+
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '30', daysToKeepStr: '14'))
+        timeout(time: 30, unit: 'MINUTES')
+        ansiColor('xterm')
+    }
+
+    environment {
+        APP_NAME = '{{APP_NAME}}'
+        NAMESPACE_PROD = '{{NAMESPACE}}'
+        NAMESPACE_STAGING = '{{NAMESPACE}}-staging'
+    }
+
+    parameters {
+        choice(
+            name: 'NAMESPACE',
+            choices: ['{{NAMESPACE}}-staging', '{{NAMESPACE}}'],
+            description: 'Target namespace'
+        )
+        booleanParam(
+            name: 'AUTO_ROLLBACK',
+            defaultValue: true,
+            description: 'Auto-rollback on health check failure'
+        )
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Validate Manifests') {
+            steps {
+                sh 'kustomize build k8s/overlays/${NAMESPACE} | kubectl apply --dry-run=client -f -'
+            }
+        }
+
+        stage('Pre-Deploy Snapshot') {
+            steps {
+                script {
+                    // Capture current state for rollback
+                    sh """
+                        kubectl get deployment ${APP_NAME} -n ${NAMESPACE} -o yaml > /tmp/pre-deploy-${APP_NAME}.yaml || true
+                        kubectl rollout history deployment/${APP_NAME} -n ${NAMESPACE} > /tmp/rollout-history-${APP_NAME}.txt || true
+                    """
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                script {
+                    def imageTag = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG = imageTag
+
+                    sh """
+                        cd k8s/overlays/${NAMESPACE}
+                        kustomize edit set image ${APP_NAME}=${REGISTRY}/${APP_NAME}:${imageTag}
+                    """
+
+                    sh """
+                        kustomize build k8s/overlays/${NAMESPACE} | kubectl apply -f -
+                    """
+                }
+            }
+        }
+
+        stage('Wait for Rollout') {
+            steps {
+                script {
+                    try {
+                        sh """
+                            kubectl rollout status deployment/${APP_NAME} \
+                                -n ${NAMESPACE} --timeout=5m
+                        """
+                    } catch (err) {
+                        if (params.AUTO_ROLLBACK) {
+                            echo "Rollout failed — rolling back"
+                            sh """
+                                kubectl rollout undo deployment/${APP_NAME} -n ${NAMESPACE}
+                                kubectl rollout status deployment/${APP_NAME} -n ${NAMESPACE} --timeout=3m
+                            """
+                        }
+                        error("Rollout failed: ${err}")
+                    }
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                script {
+                    def maxRetries = 10
+                    def retryDelay = 10
+
+                    for (int i = 1; i <= maxRetries; i++) {
+                        def status = sh(
+                            script: "curl -s -o /dev/null -w '%{http_code}' {{HEALTH_CHECK_URL}}",
+                            returnStdout: true
+                        ).trim()
+
+                        if (status == '200') {
+                            echo "Health check passed (attempt ${i})"
+                            return
+                        }
+
+                        echo "Health check: HTTP ${status} (attempt ${i}/${maxRetries})"
+                        if (i < maxRetries) {
+                            sleep(time: retryDelay, unit: 'SECONDS')
+                        }
+                    }
+
+                    if (params.AUTO_ROLLBACK) {
+                        echo "Health check failed — rolling back"
+                        sh """
+                            kubectl rollout undo deployment/${APP_NAME} -n ${NAMESPACE}
+                            kubectl rollout status deployment/${APP_NAME} -n ${NAMESPACE} --timeout=3m
+                        """
+                    }
+                    error("Health check failed after ${maxRetries} attempts")
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh "rm -f /tmp/pre-deploy-${APP_NAME}.yaml /tmp/rollout-history-${APP_NAME}.txt"
+            cleanWs()
+        }
+        success {
+            slackSend(
+                channel: '{{SLACK_CHANNEL}}',
+                color: 'good',
+                message: "✓ ${APP_NAME} deployed to *${NAMESPACE}*\nImage: ${IMAGE_TAG}\n${env.BUILD_URL}"
+            )
+        }
+        failure {
+            slackSend(
+                channel: '{{SLACK_CHANNEL}}',
+                color: 'danger',
+                message: "❌ ${APP_NAME} deploy to *${NAMESPACE}* FAILED\nImage: ${IMAGE_TAG}\n${env.BUILD_URL}"
+            )
+        }
+    }
+}

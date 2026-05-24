@@ -1,0 +1,32 @@
+# Dockerfile for Node.js Applications
+# Prerequisites: package.json and package-lock.json at build context root
+# Customize: {{NODE_VERSION}}, {{PORT}}, {{BUILD_COMMAND}}, {{START_COMMAND}}
+# Last verified: Docker 27.x, Node 20/22 LTS
+
+# Stage 1: Dependencies
+FROM node:{{NODE_VERSION}}-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+# Stage 2: Build
+FROM node:{{NODE_VERSION}}-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN {{BUILD_COMMAND}}
+
+# Stage 3: Production Runtime
+FROM node:{{NODE_VERSION}}-alpine AS runtime
+RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/{{BUILD_OUTPUT_DIR}} ./{{BUILD_OUTPUT_DIR}}
+COPY package.json ./
+USER app
+EXPOSE {{PORT}}
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:{{PORT}}/health || exit 1
+ENV NODE_ENV=production
+CMD ["node", "{{START_COMMAND}}"]

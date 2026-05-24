@@ -1,0 +1,30 @@
+# Kubernetes Ingress
+# Prerequisites: Ingress controller (nginx, traefik) installed in cluster
+# Customize: {{APP_NAME}}, {{DOMAIN}}, {{PORT}}, {{INGRESS_CLASS}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{APP_NAME}}
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"     # Remove if not using cert-manager
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"      # nginx-specific
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60s"
+    # traefik.ingress.kubernetes.io/router.middlewares: ""   # traefik-specific
+spec:
+  ingressClassName: {{INGRESS_CLASS}}
+  tls:
+    - hosts:
+        - {{DOMAIN}}
+      secretName: {{APP_NAME}}-tls
+  rules:
+    - host: {{DOMAIN}}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{APP_NAME}}
+                port:
+                  number: {{PORT}}

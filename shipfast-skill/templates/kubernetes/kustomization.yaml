@@ -1,0 +1,28 @@
+# Kustomization — Base
+# Usage:
+#   kustomize build . | kubectl apply -f -
+#   kubectl apply -k .
+#
+# Overlays extend and patch this base per environment.
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - configmap.yaml
+  - hpa.yaml
+
+images:
+  - name: {{IMAGE_NAME}}
+    newTag: latest  # Overridden by environment overlays
+
+commonLabels:
+  app: {{APP_NAME}}
+  managed-by: kustomize
+
+# Label that changes with each deployment (forces pod restart)
+configurations:
+  - kustomizeconfig.yaml

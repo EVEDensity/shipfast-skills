@@ -1,0 +1,141 @@
+// Jenkins Declarative Pipeline — Standard
+// Prerequisites: Jenkins with Git plugin, Node/Python/Go based on your stack
+// Customize: {{APP_NAME}}, {{SLACK_CHANNEL}}, agent labels
+// Last verified: Jenkins 2.440+
+
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '30', daysToKeepStr: '7'))
+        timeout(time: 30, unit: 'MINUTES')
+        ansiColor('xterm')
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        APP_NAME = '{{APP_NAME}}'
+        DOCKER_REGISTRY = '{{DOCKER_REGISTRY}}'
+        IMAGE_NAME = "${DOCKER_REGISTRY}/${APP_NAME}"
+    }
+
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['staging', 'production'],
+            description: 'Target environment'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip tests (emergency only)'
+        )
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Install') {
+            steps {
+                sh 'npm ci'  // {{PACKAGE_MANAGER_INSTALL}}
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                sh 'npm run lint'  // {{LINT_COMMAND}}
+            }
+        }
+
+        stage('Test') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            steps {
+                sh 'npm test'  // {{TEST_COMMAND}}
+            }
+            post {
+                always {
+                    junit 'test-results/*.xml'
+                    publishHTML(target: [
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'coverage',
+                        reportFiles: 'index.html',
+                        reportName: 'Coverage Report'
+                    ])
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'npm run build'  // {{BUILD_COMMAND}}
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    def version = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.IMAGE_TAG = version
+
+                    sh """
+                        docker build \
+                            -t ${IMAGE_NAME}:${version} \
+                            -t ${IMAGE_NAME}:latest \
+                            -f Dockerfile .
+                        docker push ${IMAGE_NAME}:${version}
+                        docker push ${IMAGE_NAME}:latest
+                    """
+                }
+            }
+        }
+
+        stage('Deploy') {
+            when {
+                expression { params.ENVIRONMENT == 'staging' || params.ENVIRONMENT == 'production' }
+            }
+            steps {
+                script {
+                    sh """
+                        kubectl set image deployment/${APP_NAME} \
+                            ${APP_NAME}=${IMAGE_NAME}:${IMAGE_TAG} \
+                            -n ${params.ENVIRONMENT}
+                        kubectl rollout status deployment/${APP_NAME} \
+                            -n ${params.ENVIRONMENT} --timeout=5m
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs(
+                cleanWhenNotBuilt: false,
+                deleteDirs: true,
+                disableDeferredWipeout: true
+            )
+        }
+        success {
+            slackSend(
+                channel: '{{SLACK_CHANNEL}}',
+                color: 'good',
+                message: "✓ ${APP_NAME} deploy to *${params.ENVIRONMENT}* succeeded\nTag: `${IMAGE_TAG}`\n${env.BUILD_URL}"
+            )
+        }
+        failure {
+            slackSend(
+                channel: '{{SLACK_CHANNEL}}',
+                color: 'danger',
+                message: "❌ ${APP_NAME} deploy to *${params.ENVIRONMENT}* FAILED\nStage: `${env.STAGE_NAME}`\n${env.BUILD_URL}"
+            )
+        }
+    }
+}
